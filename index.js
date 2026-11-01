@@ -27,6 +27,7 @@ export async function connectToMongoDB() {
 const connectMongodb = await connectToMongoDB();
 const allBooks = connectMongodb.db("booknook-server");
 const books = allBooks.collection("all-books");
+const borrowedBooks = allBooks.collection("borrowed-books");
 
 
 app.get("/", (req, res) => {
@@ -91,6 +92,75 @@ app.delete('/books/:id', async (req, res) => {
    const result = await books.deleteOne(query)
    res.send(result)
 });
+
+
+// profile edit
+app.patch("/profile/:id", async (req, res) => {
+
+  const data = req.body;
+  console.log(data);
+  const result = await books.updateOne(
+    { $set: data },
+  );
+  res.send(result)
+});
+
+// borrow
+app.post("/borrow", async (req, res) => {
+   const data = req.body;
+
+   const result = await books.updateOne(
+    {_id: new ObjectId(data.bookId),totalCopies: {$gt:0}},
+    {$inc:{totalCopies: -1}}
+   )
+
+   if (result.modifiedCount === 0) {
+    return res.status(400).send({ message: "Book is not available" });
+  }
+
+  const borrowResult = await borrowedBooks.insertOne(data);
+  res.send(borrowResult);
+
+});
+
+app.get("/my-borrows/:email", async (req, res) => {
+  const email = req.params.email;
+  
+  const result = await borrowedBooks.find({ userEmail: email }).toArray();
+  res.send(result);
+});
+
+// return 
+app.delete('/borrow/:id', async (req, res) => {
+
+   const id = req.params.id;
+    const borrowedbook = await borrowedBooks.findOne({
+         _id: new ObjectId(id),
+    });
+
+    if (!borrowedbook) {
+    return res.status(404).send({
+      message: "Borrowed book not found",
+    });
+  }
+    await books.updateOne(
+      {_id:new ObjectId(borrowedbook.bookId)},
+      {$inc:{totalCopies: 1}}
+    
+    )
+
+  // Delete borrowed record
+  const result =  await borrowedBooks.deleteOne({
+    _id: new ObjectId(id),
+  });
+
+  res.send({
+    message: "Book returned successfully",
+    result,
+  });
+  }
+
+);
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
