@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import "dotenv/config";
 import { MongoClient, ObjectId } from "mongodb";
-
+import { createRemoteJWKSet, jwtVerify } from "jose";
 const app = express();
 const port = 5000;
 
@@ -10,22 +10,60 @@ const port = 5000;
 app.use(cors());
 app.use(express.json());
 
-// mongodb connection
 
-const client = new MongoClient(process.env.MONGODB_URI);
+const JWKS = createRemoteJWKSet(
+  new URL("http://localhost:3000/api/auth/jwks")
+);
 
-export async function connectToMongoDB() {
-  try {
-    await client.connect();
-    console.log("You successfully connected to MongoDB!");
-    return client;
-  } catch (err) {
-    console.dir(err);
+const verifyToken = async (req, res, next) => {
+  console.log("1. Middleware called");
+
+  const authHeader = req.headers.authorization;
+
+  console.log("2. Auth Header:", authHeader);
+
+  if (!authHeader) {
+    return res.status(401).send({ msg: "Unauthorized" });
   }
+
+  const token = authHeader.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).send({ msg: "Token missing" });
+  }
+
+  try {
+  const { payload } = await jwtVerify(token, JWKS);
+
+  console.log("Verified Payload:", payload);
+
+  req.user = payload;
+
+  next();
+} catch (error) {
+  console.log("JWT Error:", error.message);
+
+  return res.status(401).send({
+    msg: "Invalid Token",
+  });
+}
+};
+
+// mongodb connection
+const uri = process.env.MONGODB_URI;
+
+if (!uri) {
+  throw new Error("MONGODB_URI is missing from environment variables");
 }
 
-const connectMongodb = await connectToMongoDB();
-const allBooks = connectMongodb.db("booknook-server");
+const client = new MongoClient(uri);
+
+await client.connect();
+
+console.log("Successfully connected to MongoDB!");
+
+const allBooks = client.db("booknook-server");
+
 const books = allBooks.collection("all-books");
 const borrowedBooks = allBooks.collection("borrowed-books");
 
@@ -42,7 +80,7 @@ app.get("/books", async (req, res) => {
 });
 
 // create
-app.post("/books", async (req, res) => {
+app.post("/books",verifyToken, async (req, res) => {
   const newBooks = req.body;
   console.log("adding new book", newBooks);
 
@@ -50,12 +88,17 @@ app.post("/books", async (req, res) => {
   res.send(result);
 });
 // read
-app.get("/books/:id", async (req, res) => {
-  console.log(req);
+app.get("/books/:id", verifyToken, async (req, res) => {
+  console.log("Books API called");
+
   const id = req.params.id;
 
   const query = { _id: new ObjectId(id) };
+
   const result = await books.findOne(query);
+
+  console.log("Book Data:", result);
+
   res.send(result);
 });
 
@@ -66,7 +109,7 @@ app.get("/new-arrivals", async (req, res) => {
 });
 
 // my-books
-app.get("/my-books/:email", async (req, res) => {
+app.get("/my-books/:email",verifyToken, async (req, res) => {
   const email = req.params.email;
 
   const result = await books.find({ "addedBy.email": email }).toArray();
@@ -74,7 +117,7 @@ app.get("/my-books/:email", async (req, res) => {
 });
 
 // my-books update
-app.patch("/books/:id", async (req, res) => {
+app.patch("/books/:id", verifyToken,async (req, res) => {
   const id = req.params.id;
   const data = req.body;
   console.log(data);
@@ -86,7 +129,7 @@ app.patch("/books/:id", async (req, res) => {
 });
 
 //my-book delete
-app.delete('/books/:id', async (req, res) => {
+app.delete('/books/:id',verifyToken, async (req, res) => {
    const id = req.params.id;
    const query = {_id:new ObjectId(id)}
    const result = await books.deleteOne(query)
@@ -106,7 +149,7 @@ app.patch("/profile/:id", async (req, res) => {
 });
 
 // borrow
-app.post("/borrow", async (req, res) => {
+app.post("/borrow",verifyToken, async (req, res) => {
    const data = req.body;
 
    const result = await books.updateOne(
@@ -123,7 +166,7 @@ app.post("/borrow", async (req, res) => {
 
 });
 
-app.get("/my-borrows/:email", async (req, res) => {
+app.get("/my-borrows/:email",verifyToken, async (req, res) => {
   const email = req.params.email;
   
   const result = await borrowedBooks.find({ userEmail: email }).toArray();
@@ -131,7 +174,7 @@ app.get("/my-borrows/:email", async (req, res) => {
 });
 
 // return 
-app.delete('/borrow/:id', async (req, res) => {
+app.delete('/borrow/:id',verifyToken, async (req, res) => {
 
    const id = req.params.id;
     const borrowedbook = await borrowedBooks.findOne({
