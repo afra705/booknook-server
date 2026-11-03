@@ -12,7 +12,7 @@ app.use(express.json());
 
 
 const JWKS = createRemoteJWKSet(
-  new URL("http://localhost:3000/api/auth/jwks")
+  new URL(`${process.env.CLIENT_URI}/api/auth/jwks`)
 );
 
 const verifyToken = async (req, res, next) => {
